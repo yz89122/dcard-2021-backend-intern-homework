@@ -17,14 +17,64 @@ func TestNewLocalPeriodRateLimiter(t *testing.T) {
 func TestLocalPeriodRateLimiterRequests(t *testing.T) {
 	limiter := NewLocalPeriodRateLimiter(10*time.Second, 10)
 	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("test:%d", i)
 		for j := 0; j < 10; j++ {
-			quota, _, err := limiter.Request(context.Background(), fmt.Sprintf("test:%d", i), 1)
+			quota, _, err := limiter.Request(context.Background(), key, 1)
 			if quota < 0 {
 				t.Errorf("quota should >= 0, got %v", quota)
 			}
 			if err != nil {
 				t.Errorf("err != nil: %v", err)
 			}
+		}
+		quota, _, err := limiter.Request(context.Background(), key, 1)
+		if quota > 1 {
+			t.Errorf("quota should be less than 1, got %v", quota)
+		}
+		if err == nil {
+			t.Errorf("should get error")
+		}
+	}
+}
+
+func TestLocalPeriodRateLimiterRequestsConcurrently(t *testing.T) {
+	maxQuota := float64(10000)
+	goroutines := 1000
+	limiter := NewLocalPeriodRateLimiter(10*time.Second, maxQuota)
+	ch := make(chan bool, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			key := fmt.Sprintf("test:%d", i)
+			for j := 0; j < int(maxQuota); j++ {
+				quota, _, err := limiter.Request(context.Background(), key, 1)
+				if quota < 0 {
+					t.Errorf("quota of key [%v] should >= 0, got %v", key, quota)
+				}
+				if err != nil {
+					t.Errorf("err != nil: %v", err)
+				}
+			}
+			quota, _, err := limiter.Request(context.Background(), key, 1)
+			if quota > 1 {
+				t.Errorf("quota of [%v] should be less than 1, got %v", key, quota)
+			}
+			if err == nil {
+				t.Errorf("should get error")
+			}
+			ch <- true
+		}(i)
+	}
+	for i := 0; i < goroutines; i++ {
+		<-ch
+	}
+	for i := 0; i < goroutines; i++ {
+		key := fmt.Sprintf("test:%d", i)
+		quota, _, err := limiter.Request(context.Background(), key, 1)
+		if quota > 1 {
+			t.Errorf("quota of key [%v] should be less than 1, got %v", key, quota)
+		}
+		if err == nil {
+			t.Errorf("should get error")
 		}
 	}
 }

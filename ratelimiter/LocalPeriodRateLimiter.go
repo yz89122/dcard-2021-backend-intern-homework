@@ -93,6 +93,19 @@ func (limiter *localPeriodRateLimiterImpl) createQuotaForKey(key string) *localP
 	return quota
 }
 
+func (limiter *localPeriodRateLimiterImpl) getOrCreateQuotaForKey(key string) *localPeriodRateLimiterQuota {
+	limiter.mutex.Lock()
+	defer limiter.mutex.Unlock()
+	// check it again if some goroutine created
+	// the quota object just before this goroutine
+	// in a concurrent situation
+	if quota := limiter.quotaMap[key]; quota != nil {
+		// if other writer already created for the key
+		return quota
+	}
+	return limiter.createQuotaForKey(key)
+}
+
 // Request increment the request count of the key and return
 // the remaining request count and the time to be reset.
 func (limiter *localPeriodRateLimiterImpl) Request(_ context.Context, key string, cost float64) (float64, time.Time, error) {
@@ -102,26 +115,19 @@ func (limiter *localPeriodRateLimiterImpl) Request(_ context.Context, key string
 		return limiter.tryRequest(key, quota, cost)
 	}
 
-	quota := func() *localPeriodRateLimiterQuota {
-		// wrap in func in order to release the lock ASAP
-		limiter.mutex.Lock()
-		defer limiter.mutex.Unlock()
-		if quota := limiter.quotaMap[key]; quota != nil {
-			// if other writer already created for the key
-			return quota
-		}
-		return limiter.createQuotaForKey(key)
-	}()
-
+	// wrap in func in order to release the lock ASAP
+	quota := limiter.getOrCreateQuotaForKey(key)
 	return limiter.tryRequest(key, quota, cost)
 }
 
 func (limiter *localPeriodRateLimiterImpl) pruneKeys() {
+	// index of the prune queue
 	index := 0
+	// we save the current time in order to reduce the number of API calls
 	now := time.Now()
 
 	// we're going to remove keys from the map
-	limiter.mutex.Lock()
+	limiter.mutex.Lock() // writer lock
 	defer limiter.mutex.Unlock()
 	// we're going to pop from the queue
 	limiter.pruneQueueMutex.Lock()
@@ -132,6 +138,8 @@ func (limiter *localPeriodRateLimiterImpl) pruneKeys() {
 			break
 		}
 		index++
+		// we need to check the `expiresAt` because
+		// the expiresAt might be updated
 		if now.After(limiter.quotaMap[job.key].expiresAt) {
 			delete(limiter.quotaMap, job.key)
 		}
@@ -143,24 +151,23 @@ func (limiter *localPeriodRateLimiterImpl) pruneKeys() {
 
 func (limiter *localPeriodRateLimiterImpl) shouldPrune() bool {
 	if now := time.Now(); now.After(limiter.nextPruneAt) {
-		// no need to lock if we just read the data
+		// no need to lock if we just read the data,
 		// less locking to improve performance
-		return func() bool {
-			limiter.nextPruneAtMutex.Lock()
-			defer limiter.nextPruneAtMutex.Unlock()
-			if now.After(limiter.nextPruneAt) {
-				// if it's the first goroutine do the pruning
-				limiter.nextPruneAt = now.Add(limiter.period)
-				return true
-			}
-			return false
-		}()
+		limiter.nextPruneAtMutex.Lock()
+		defer limiter.nextPruneAtMutex.Unlock()
+		// if it's the first goroutine do the pruning
+		if now.After(limiter.nextPruneAt) {
+			limiter.nextPruneAt = now.Add(limiter.period)
+			return true
+		}
 	}
 	return false
 }
 
 func (limiter *localPeriodRateLimiterImpl) tryPruneKeys() {
 	if limiter.shouldPrune() { // Note: shouldPrune() will update limiter.nextPruneAt
+		// we separate the operations into two functions because
+		// we want to release the lock ASAP
 		limiter.pruneKeys()
 	}
 }
