@@ -17,7 +17,7 @@ func main() {
 	{
 		router := router.Group("/local-time-period/")
 		rateLimiter := ratelimiter.NewLocalPeriodRateLimiter(1*time.Hour, 1000)
-		router.Use(middleware.PeriodRateLimitByIPAddr(rateLimiter))
+		router.Use(middleware.RateLimitByIPAddr(rateLimiter))
 		router.GET("/ping", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"message": "pong",
@@ -32,7 +32,7 @@ func main() {
 		{
 			router := router.Group("/redis-time-period/")
 			redisPeriodRatelimiter := ratelimiter.NewRedisPeriodRateLimiter(1*time.Hour, 1000, rdb, "test")
-			router.Use(middleware.PeriodRateLimitByIPAddr(redisPeriodRatelimiter))
+			router.Use(middleware.RateLimitByIPAddr(redisPeriodRatelimiter))
 			router.GET("/ping", func(c *gin.Context) {
 				c.JSON(200, gin.H{
 					"message": "pong",
@@ -42,7 +42,7 @@ func main() {
 		{
 			router := router.Group("/redis-token-bucket/")
 			redisTokenBucketLimiter := ratelimiter.NewRedisTokenBucketRateLimiter(1*time.Hour, 1000, rdb, "test")
-			router.Use(middleware.PeriodRateLimitByIPAddr(redisTokenBucketLimiter))
+			router.Use(middleware.RateLimitByIPAddr(redisTokenBucketLimiter))
 			router.GET("/ping", func(c *gin.Context) {
 				c.JSON(200, gin.H{
 					"message": "pong",

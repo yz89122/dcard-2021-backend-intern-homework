@@ -8,9 +8,9 @@ import (
 	"github.com/yz89122/dcard-2021-backend-intern-homework/ratelimiter"
 )
 
-// PeriodRateLimitByIPAddr limit the request rate of each IP address
+// RateLimitByIPAddr limit the request rate of each IP address
 // by the given limiter
-func PeriodRateLimitByIPAddr(limiter ratelimiter.RateLimiter) gin.HandlerFunc {
+func RateLimitByIPAddr(limiter ratelimiter.RateLimiter) gin.HandlerFunc {
 	const rateLimitResetHeader string = "X-RateLimit-Reset"
 	const rateLimitRemainingHeader string = "X-RateLimit-Remaining"
 	return func(c *gin.Context) {
